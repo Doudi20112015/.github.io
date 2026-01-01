@@ -1,0 +1,459 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>机器人实验室 - 三栖世界</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background: #e0f7ff;
+      font-family: 'Arial', sans-serif;
+    }
+    #game {
+      position: relative;
+      width: 400px;
+      height: 600px;
+      border: 4px solid #333;
+      border-radius: 8px;
+      overflow: hidden;
+      background: linear-gradient(to bottom, #b3e5fc, #a0d8ef); /* 天蓝色天空 */
+    }
+    canvas {
+      display: block;
+    }
+    .menu {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+      z-index: 10;
+    }
+    button {
+      padding: 12px 30px;
+      font-size: 18px;
+      background: #4CAF50;
+      color: white;
+      font-weight: bold;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #score {
+      position: absolute;
+      top: 10px;
+      left: 15px;
+      font: bold 20px sans-serif;
+      color: #006400;
+      text-shadow: 1px 1px 1px white;
+      z-index: 5;
+    }
+  </style>
+</head>
+<body>
+
+<div id="game">
+  <canvas id="canvas" width="400" height="600"></canvas>
+  <div id="score">得分: 0</div>
+
+  <!-- 开始界面 -->
+  <div id="start" class="menu">
+    <h2 style="color:#4CAF50;">🚀 启动飞行器</h2>
+    <p>穿越10道门<br>抵达未来世界</p>
+    <button id="btn-start">开始飞行</button>
+  </div>
+
+  <!-- 结束界面 -->
+  <div id="over" class="menu" style="display:none;">
+    <h2>⚠️ 系统休眠</h2>
+    <p>共穿越 <span id="final">0</span> 区域</p>
+    <button id="btn-restart">重新激活</button>
+  </div>
+</div>
+
+<script>
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const startScreen = document.getElementById('start');
+  const gameOverScreen = document.getElementById('over');
+  const scoreDisplay = document.getElementById('score');
+  const finalScore = document.getElementById('final');
+  const btnStart = document.getElementById('btn-start');
+  const btnRestart = document.getElementById('btn-restart');
+
+  // 游戏变量
+  let bot, pipes, isPressed, isRunning, score, gameMode;
+  let gameLoopId = null;
+  let pipeIntervalId = null;
+
+  // 实验室中的机器人（三栖）
+  let flyingBots = [];
+  let groundBots = [];
+  let seaBots = [];
+
+  // 模式定义
+  const MODE_NORMAL = 'normal';
+  const MODE_LAB = 'lab'; // 进入实验室
+
+  // 初始化游戏
+  function init() {
+    if (gameLoopId) cancelAnimationFrame(gameLoopId);
+    if (pipeIntervalId) clearInterval(pipeIntervalId);
+
+    bot = { x: 80, y: 300, w: 50, h: 30 };
+    pipes = [];
+    isPressed = false;
+    isRunning = true;
+    score = 0;
+    gameMode = MODE_NORMAL;
+
+    // 清空三栖机器人
+    flyingBots = [];
+    groundBots = [];
+    seaBots = [];
+
+    scoreDisplay.textContent = `得分: ${score}`;
+
+    // 正常模式生成管道
+    pipeIntervalId = setInterval(() => {
+      if (!isRunning || gameMode !== MODE_NORMAL) return;
+      const gap = 180;
+      const minHeight = 80;
+      const maxHeight = 500 - gap - minHeight;
+      const topHeight = Math.floor(Math.random() * (maxHeight - minHeight + 1)) + minHeight;
+
+      pipes.push({
+        x: 400,
+        w: 60,
+        topH: topHeight,
+        botY: topHeight + gap,
+        passed: false
+      });
+    }, 2500);
+  }
+
+  // 绘制主角飞行机器人
+  function drawBot(x, y, angleRad) {
+    ctx.save();
+    ctx.translate(x + 25, y + 15);
+    ctx.rotate(angleRad);
+
+    ctx.fillStyle = '#A0D8F1';
+    ctx.beginPath(); ctx.ellipse(0, 0, 25, 12, 0, 0, Math.PI * 2); ctx.fill();
+
+    ctx.fillStyle = '#D0F0FF';
+    ctx.beginPath(); ctx.ellipse(0, -2, 18, 6, 0, 0, Math.PI * 2); ctx.fill();
+
+    ctx.fillStyle = '#FFFFFF'; ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#00D1FF'; ctx.beginPath(); ctx.arc(0, 0, 2, 0, Math.PI * 2); ctx.fill();
+
+    // 推进火焰
+    if (!isPressed) {
+      for (let i = 0; i < 3; i++) {
+        const fy = -3 + i * 3;
+        const fw = 2 + Math.random() * 1.5;
+        ctx.fillStyle = ['#8AF', '#68F', '#AAFFFF'][i];
+        ctx.fillRect(-26 - fw, fy, fw, 2);
+        ctx.fillRect(20, fy, fw, 2);
+      }
+    }
+
+    // 天线
+    ctx.strokeStyle = '#CCC'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(0, -20); ctx.stroke();
+    ctx.fillStyle = '#FF5555'; ctx.beginPath(); ctx.arc(0, -22, 3, 0, Math.PI * 2); ctx.fill();
+
+    ctx.restore();
+  }
+
+  // 绘制三栖背景
+  function drawLabScene() {
+    // === 天空 ===
+    ctx.fillStyle = '#b3e5fc';
+    ctx.fillRect(0, 0, 400, 200);
+
+    // === 云朵装饰 ===
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    [[100,50],[250,80]].forEach(([x,y])=>{
+      ctx.beginPath(); ctx.arc(x-15,y,15,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x,y-10,20,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x+15,y,15,0,Math.PI*2); ctx.fill();
+    });
+
+    // === 陆地（地面）===
+    ctx.fillStyle = '#9ECB7C';
+    ctx.fillRect(0, 400, 400, 80);
+
+    // === 海洋（水体）===
+    ctx.fillStyle = '#4A90E2';
+    ctx.fillRect(0, 480, 400, 120);
+
+    // 水波纹
+    ctx.strokeStyle = '#6EB5FF';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 400; i += 20) {
+      ctx.beginPath();
+      ctx.moveTo(i, 490);
+      ctx.quadraticCurveTo(i + 10, 488, i + 20, 490);
+      ctx.stroke();
+    }
+
+    // 标题文字
+    ctx.fillStyle = '#006400';
+    ctx.font = 'bold 32px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText("欢迎来到", 200, 250);
+    ctx.fillStyle = '#003366';
+    ctx.font = 'bold 36px "Comic Sans MS"';
+    ctx.fillText("机器人实验室", 200, 300);
+    ctx.fillStyle = '#555';
+    ctx.font = '16px sans-serif';
+    ctx.fillText("—— 全场景开发中", 200, 330);
+  }
+
+  // 创建三栖机器人
+  function createLabRobots() {
+    // 飞行机器人（天上）
+    flyingBots = [
+      { x: 80, y: 100, dx: 1, type: 'fly' },
+      { x: 300, y: 140, dx: -1, type: 'fly' }
+    ];
+
+    // 地面机器人（地上行走）
+    groundBots = [
+      { x: 100, y: 450, dx: 1, type: 'walk' },
+      { x: 300, y: 450, dx: -1, type: 'walk' }
+    ];
+
+    // 海底机器人（海里游动）
+    seaBots = [
+      { x: 60, y: 530, dx: 1.2, type: 'swim' },
+      { x: 340, y: 550, dx: -1.0, type: 'swim' }
+    ];
+  }
+
+  // 绘制并更新三栖机器人
+  function updateAndDrawRobots() {
+    if (flyingBots.length === 0) createLabRobots();
+
+    // 更新和绘制飞行机器人（空中滑翔）
+    flyingBots.forEach(r => {
+      r.x += r.dx;
+      if (r.x > 420) r.x = -40;
+      if (r.x < -40) r.x = 420;
+
+      ctx.save();
+      ctx.translate(r.x, r.y);
+      ctx.scale(r.dx > 0 ? 1 : -1, 1); // 面向移动方向
+
+      // 飞行器造型
+      ctx.fillStyle = '#A0D8F1';
+      ctx.fillRect(-12, -10, 24, 12);
+      ctx.fillStyle = '#8AC6FF';
+      ctx.beginPath(); ctx.arc(0, -10, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#00D1FF';
+      ctx.beginPath(); ctx.arc(0, -10, 3, 0, Math.PI * 2); ctx.fill();
+
+      // 小翅膀
+      ctx.fillStyle = '#666';
+      ctx.fillRect(-20, -6, 6, 10);
+      ctx.fillRect(14, -6, 6, 10);
+
+      ctx.restore();
+    });
+
+    // 更新和绘制地面机器人（行走）
+    groundBots.forEach(r => {
+      r.x += r.dx;
+      if (r.x > 380 || r.x < 20) r.dx *= -1;
+
+      ctx.save();
+      ctx.translate(r.x, r.y);
+
+      // 身体
+      ctx.fillStyle = '#A0D8F1';
+      ctx.fillRect(-10, -20, 20, 20);
+      ctx.fillStyle = '#8AC6FF';
+      ctx.beginPath(); ctx.arc(0, -28, 8, 0, Math.PI * 2); ctx.fill();
+
+      // 电子眼
+      ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(-3, -28, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'black'; ctx.beginPath(); ctx.arc(-3, -28, 1.5, 0, Math.PI * 2); ctx.fill();
+
+      // 手臂摆动
+      ctx.fillRect(-18, -18, 4, 10);
+      ctx.fillRect(14, -18, 4, 10);
+
+      // 腿部交替
+      ctx.fillRect(-10, -2, 6, 10);
+      ctx.fillRect(4, -2, 6, 10);
+
+      ctx.restore();
+    });
+
+    // 更新和绘制海底机器人（左右游动）
+    seaBots.forEach(r => {
+      r.x += r.dx;
+      if (r.x > 420) r.x = -40;
+      if (r.x < -40) r.x = 420;
+
+      ctx.save();
+      ctx.translate(r.x, r.y);
+      ctx.scale(r.dx > 0 ? 1 : -1, 1);
+
+      // 潜航机器人（鱼雷形）
+      ctx.fillStyle = '#4A90E2';
+      ctx.beginPath(); ctx.ellipse(0, 0, 18, 10, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#6EB5FF';
+      ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI * 2); ctx.fill();
+
+      // 鳍片
+      ctx.fillStyle = '#3A7BC8';
+      ctx.fillRect(-10, -6, 4, 12);
+      ctx.fillRect(6, -4, 4, 8);
+
+      ctx.restore();
+    });
+  }
+
+  // 绘制普通场景
+  function drawNormalScene() {
+    // 白云
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    [[80,100],[280,160]].forEach(([cx,cy])=>{
+      ctx.beginPath(); ctx.arc(cx-20,cy,25,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx,cy-10,35,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx+20,cy,25,0,Math.PI*2); ctx.fill();
+    });
+
+    // 绿墙
+    ctx.fillStyle = '#4CAF50';
+    pipes.forEach(p => {
+      ctx.fillRect(p.x, 0, p.w, p.topH);
+      ctx.fillRect(p.x, p.botY, p.w, 600 - p.botY);
+      ctx.fillStyle = '#3e8b41';
+      ctx.fillRect(p.x, p.topH - 8, p.w, 4);
+      ctx.fillRect(p.x, p.botY, p.w, 4);
+      ctx.fillStyle = '#4CAF50';
+    });
+  }
+
+  // 绘制画面
+  function draw() {
+    ctx.clearRect(0, 0, 400, 600);
+
+    if (gameMode === MODE_LAB) {
+      drawLabScene();
+      updateAndDrawRobots();
+    } else {
+      drawNormalScene();
+      const angle = isPressed ? 0.3 : -0.15;
+      drawBot(bot.x, bot.y, angle);
+    }
+  }
+
+  // 更新逻辑
+  function update() {
+    if (!isRunning) return;
+
+    if (gameMode === MODE_NORMAL) {
+      // 控制飞行
+      if (!isPressed) {
+        bot.y -= 1.2;
+      } else {
+        bot.y += 4;
+      }
+
+      // 边界检测
+      if (bot.y <= 0 || bot.y >= 570) {
+        gameOver();
+        return;
+      }
+
+      // 管道移动 + 得分
+      pipes.forEach(pipe => {
+        pipe.x -= 2;
+
+        if (!pipe.passed && pipe.x + pipe.w < bot.x) {
+          score++;
+          scoreDisplay.textContent = `得分: ${score}`;
+          pipe.passed = true;
+
+          // 🎉 第10关开启实验室
+          if (score === 10) {
+            enterRobotLab();
+          }
+        }
+
+        // 碰撞检测
+        if (
+          bot.x + 50 > pipe.x &&
+          bot.x < pipe.x + pipe.w &&
+          (bot.y < pipe.topH || bot.y + 30 > pipe.botY)
+        ) {
+          gameOver();
+        }
+      });
+
+      // 删除旧管道
+      while (pipes.length > 0 && pipes[0].x < -60) {
+        pipes.shift();
+      }
+    }
+
+    draw();
+    gameLoopId = requestAnimationFrame(update);
+  }
+
+  // 进入机器人实验室
+  function enterRobotLab() {
+    gameMode = MODE_LAB;
+    alert("🎉 恭喜！\n\n你已成功抵达：\n\n【机器人实验室】\n\n系统开发中……");
+    pipes = [];
+    if (pipeIntervalId) clearInterval(pipeIntervalId);
+  }
+
+  function gameOver() {
+    isRunning = false;
+    finalScore.textContent = score;
+    gameOverScreen.style.display = 'flex';
+    if (pipeIntervalId) clearInterval(pipeIntervalId);
+  }
+
+  function startGame() {
+    init();
+    startScreen.style.display = 'none';
+    gameOverScreen.style.display = 'none';
+    update();
+  }
+
+  // 事件绑定
+  window.addEventListener('load', () => {
+    btnStart.onclick = startGame;
+    btnRestart.onclick = startGame;
+
+    canvas.onmousedown = () => { isPressed = true; };
+    window.onmouseup = () => { isPressed = false; };
+
+    canvas.ontouchstart = e => { e.preventDefault(); isPressed = true; };
+    window.ontouchend = () => { isPressed = false; };
+
+    window.onkeydown = e => {
+      if (e.code === 'Space') { e.preventDefault(); isPressed = true; }
+    };
+    window.onkeyup = e => {
+      if (e.code === 'Space') { isPressed = false; }
+    };
+  });
+</script>
+
+</body>
+</html>
